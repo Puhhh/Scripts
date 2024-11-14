@@ -11,5 +11,5 @@
 
 ### Создание SSL сертификата
 ```bash
-./slurm-video-download.sh name.example.com
+./cert-gen.sh name.example.com
 ```
