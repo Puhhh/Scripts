@@ -13,3 +13,8 @@
 ```bash
 ./cert-gen.sh name.example.com
 ```
+
+### Извлечение сертификатов
+```bash
+./cert-ext.sh name.kubernetes.local
+```
