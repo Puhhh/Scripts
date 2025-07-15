@@ -65,11 +65,12 @@ check_user() {
 
 # === 2. Проверка базового дистрибутива ===
 check_base_os() {
-  BASE_OS=$(grep -iEr 'redos|astralinux' "$WORKDIR"/etc/*-release 2>/dev/null | head -1 || true)
-  if [[ "$BASE_OS" =~ (redos|astralinux) ]]; then
-    log_ok "Базовый дистрибутив: $BASE_OS"
+  BASE_OS=$(grep -iEr 'redos|astralinux|alt' "$WORKDIR"/etc/*-release 2>/dev/null | head -1 || true)
+  if [[ "$BASE_OS" =~ (redos|astralinux|alt) ]]; then
+    BASE_OS_REL=$(echo "$BASE_OS" | sed "s|$WORKDIR||")
+    log_ok "Базовый дистрибутив: $BASE_OS_REL"
   else
-    log_fail "Базовый дистрибутив не Red OS/Astra Linux"
+    log_fail "Базовый дистрибутив не Red OS / Astra Linux / ALT"
   fi
 }
 
