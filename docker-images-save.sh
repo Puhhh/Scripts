@@ -4,8 +4,10 @@ set -e
 
 usage() {
     echo "Usage:"
-    echo "  $0 image1 [image2 ...]"
-    echo "  $0 -f image_list.txt"
+    echo "  $0 [-p platform] image1 [image2 ...]"
+    echo "  $0 [-p platform] -f image_list.txt"
+    echo "Options:"
+    echo "  -p platform   Платформа для pull/save (по умолчанию: linux/amd64)"
     exit 1
 }
 
@@ -15,37 +17,54 @@ if ! command -v docker &>/dev/null; then
     exit 1
 fi
 
-# Проверка входных параметров
-if [[ $# -lt 1 ]]; then
-    usage
-fi
-
+PLATFORM="linux/amd64"
 IMAGES=()
+FILE=""
 
-# Если первый параметр -f, читаем из файла
-if [[ "$1" == "-f" ]]; then
-    FILE="$2"
-    if [[ -z "$FILE" || ! -f "$FILE" ]]; then
+# Парсим аргументы
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -p)
+            PLATFORM="$2"
+            shift 2
+            ;;
+        -f)
+            FILE="$2"
+            shift 2
+            ;;
+        -*)
+            usage
+            ;;
+        *)
+            IMAGES+=("$1")
+            shift
+            ;;
+    esac
+done
+
+# Если выбран файл
+if [[ -n "$FILE" ]]; then
+    if [[ ! -f "$FILE" ]]; then
         echo "❌ Файл со списком образов не найден: $FILE"
         exit 1
     fi
-    # Читаем строки, пропуская пустые и комментарии
     while IFS= read -r line; do
         [[ -z "$line" || "$line" =~ ^# ]] && continue
         IMAGES+=("$line")
     done < "$FILE"
-else
-    IMAGES=("$@")
+fi
+
+if [[ ${#IMAGES[@]} -eq 0 ]]; then
+    usage
 fi
 
 for IMAGE in "${IMAGES[@]}"; do
-    # Имя файла: заменяем все символы / и : на _
     SAFE_NAME=$(echo "$IMAGE" | sed 's#[/:]#_#g')
     ARCHIVE="${SAFE_NAME}.tar"
 
     echo "=========================================="
-    echo "⏬ Скачиваем образ: $IMAGE"
-    docker pull "$IMAGE"
+    echo "⏬ Скачиваем образ: $IMAGE для платформы $PLATFORM"
+    docker pull --platform "$PLATFORM" "$IMAGE"
 
     echo "💾 Сохраняем в архив: $ARCHIVE"
     docker save -o "$ARCHIVE" "$IMAGE"
