@@ -66,11 +66,13 @@ check_user() {
 # === 2. Проверка базового дистрибутива ===
 check_base_os() {
   BASE_OS=$(grep -iEr 'redos|astralinux|alt' "$WORKDIR"/etc/*-release 2>/dev/null | head -1 || true)
-  if [[ "$BASE_OS" =~ (redos|astralinux|alt) ]]; then
-    BASE_OS_REL=$(echo "$BASE_OS" | sed "s|$WORKDIR||")
+  BASE_OS_REL=$(echo "$BASE_OS" | sed "s|$WORKDIR||")
+  # Приводим к нижнему регистру для проверки
+  BASE_OS_CHECK=$(echo "$BASE_OS" | tr '[:upper:]' '[:lower:]')
+  if [[ "$BASE_OS_CHECK" =~ (redos|astralinux|alt) ]]; then
     log_ok "Базовый дистрибутив: $BASE_OS_REL"
   else
-    log_fail "Базовый дистрибутив не Red OS / Astra Linux / ALT"
+    log_fail "Базовый дистрибутив не Red OS / Astra Linux / ALT. Найдено: ${BASE_OS_REL:-'не найдено'}"
   fi
 }
 
@@ -138,8 +140,15 @@ check_su_sudo() {
 # === 6. Проверка на наличие секретов ===
 check_secrets() {
   log_info "Проверка на наличие секретов..."
-  SECRET_FILES=$(find "$WORKDIR" \( -iname '*secret*' -o -iname '*password*' -o -iname '*.pem' -o -iname '*.key' -o -iname '*.crt' \) 2>/dev/null)
-  SECRET_CONTENT=$(grep -r -i -E 'password|secret|token|api[_-]?key' "$WORKDIR" 2>/dev/null | head -n 10 || true)
+  SECRET_FILES=$(find "$WORKDIR" \
+    \( -path "$WORKDIR/etc/ssl/certs" -o -path "$WORKDIR/usr/share/ca-certificates" \) -prune -o \
+    \( -iname '*secret*' -o -iname '*password*' -o -iname '*.pem' -o -iname '*.key' -o -iname '*.crt' \) -print 2>/dev/null
+  )
+
+  # Для поиска по содержимому -- исключаем те же каталоги
+  SECRET_CONTENT=$(grep -r --exclude-dir="$WORKDIR/etc/ssl/certs" --exclude-dir="$WORKDIR/usr/share/ca-certificates" \
+    -i -E 'password|secret|token|api[_-]?key' "$WORKDIR" 2>/dev/null | head -n 10 || true)
+
   if [[ -n "$SECRET_FILES" ]]; then
     log_fail "Обнаружены потенциально секретные файлы:"
     echo "$SECRET_FILES" | sed "s|$WORKDIR||g"
@@ -152,6 +161,7 @@ check_secrets() {
     log_ok "Явные секреты не найдены"
   fi
 }
+
 
 # === 7. Проверка на наличие root-процессов в ENTRYPOINT/CMD ===
 check_entrypoint_root() {
