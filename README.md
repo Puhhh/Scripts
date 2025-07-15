@@ -26,7 +26,7 @@ bash rootless-docker-audit.sh
 
 ## Возможности
 - Проверка пользователя по умолчанию (USER)
-- Проверка базового дистрибутива (Red OS / Astra Linux)
+- Проверка базового дистрибутива (Red OS / Astra Linux / ALT Container)
 - Проверка на distroless-образ
 - Поиск SUID/SGID файлов
 - Поиск su/sudo бинарей
@@ -64,4 +64,30 @@ Modes:
 
 Options:
   --min-severity=LEVEL   Minimum severity to display (CRITICAL|HIGH|MEDIUM|LOW|UNKNOWN)
+```
+
+---
+# Save Docker Images
+Скрипт для автоматического скачивания Docker-образов и сохранения их в виде архивов.
+
+## Возможности
+- Принимает список Docker-образов через аргументы командной строки или через файл со списком.
+- Скачивает (docker pull) и сохраняет (docker save) каждый образ в отдельный .tar архив.
+
+## Использование
+```bash
+# Скачивание отдельных образов
+./save_docker_images.sh ubuntu:22.04 nginx:1.25-alpine redis:7
+```
+
+```bash
+# Скачивание из файла со списком
+./save_docker_images.sh -f images.txt
+```
+```
+# images.txt
+
+ubuntu:22.04
+nginx:1.25-alpine
+redis:7
 ```
