@@ -80,11 +80,6 @@ check_base_os() {
 check_distroless() {
   DISTROLESS_SCORE=0
   DISTROLESS_FAILS=()
-  if [[ ! -f "$WORKDIR/etc/os-release" && ! -f "$WORKDIR/etc/lsb-release" ]]; then
-    ((DISTROLESS_SCORE++))
-  else
-    DISTROLESS_FAILS+=("Присутствует файл /etc/os-release или /etc/lsb-release")
-  fi
   FOUND_SHELLS=$(find "$WORKDIR" -type f \( -name 'sh' -o -name 'bash' -o -name 'dash' \) 2>/dev/null)
   if [[ -z "$FOUND_SHELLS" ]]; then
     ((DISTROLESS_SCORE++))
