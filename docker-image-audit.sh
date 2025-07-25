@@ -137,33 +137,7 @@ check_su_sudo() {
   fi
 }
 
-# === 6. Проверка на наличие секретов ===
-check_secrets() {
-  log_info "Проверка на наличие секретов..."
-  SECRET_FILES=$(find "$WORKDIR" \
-    \( -path "$WORKDIR/etc/ssl/certs" -o -path "$WORKDIR/usr/share/ca-certificates" \) -prune -o \
-    \( -iname '*secret*' -o -iname '*password*' -o -iname '*.pem' -o -iname '*.key' -o -iname '*.crt' \) -print 2>/dev/null
-  )
-
-  # Для поиска по содержимому -- исключаем те же каталоги
-  SECRET_CONTENT=$(grep -r --exclude-dir="$WORKDIR/etc/ssl/certs" --exclude-dir="$WORKDIR/usr/share/ca-certificates" \
-    -i -E 'password|secret|token|api[_-]?key' "$WORKDIR" 2>/dev/null | head -n 10 || true)
-
-  if [[ -n "$SECRET_FILES" ]]; then
-    log_fail "Обнаружены потенциально секретные файлы:"
-    echo "$SECRET_FILES" | sed "s|$WORKDIR||g"
-  fi
-  if [[ -n "$SECRET_CONTENT" ]]; then
-    log_fail "Обнаружено потенциальное содержимое секретов (первые строки):"
-    echo "$SECRET_CONTENT" | sed "s|$WORKDIR||g"
-  fi
-  if [[ -z "$SECRET_FILES" && -z "$SECRET_CONTENT" ]]; then
-    log_ok "Явные секреты не найдены"
-  fi
-}
-
-
-# === 7. Проверка на наличие root-процессов в ENTRYPOINT/CMD ===
+# === 6. Проверка на наличие root-процессов в ENTRYPOINT/CMD ===
 check_entrypoint_root() {
   ENTRYPOINT=$(docker inspect --format '{{json .Config.Entrypoint}}' "$IMAGE" | tr -d '[]",' | xargs)
   CMD=$(docker inspect --format '{{json .Config.Cmd}}' "$IMAGE" | tr -d '[]",' | xargs)
@@ -183,7 +157,7 @@ check_entrypoint_root() {
   fi
 }
 
-# === 8. Проверка разрешений на чувствительные каталоги ===
+# === 7. Проверка разрешений на чувствительные каталоги ===
 check_sensitive_dirs() {
   for dir in /etc /var /root /home; do
     DIRPATH="$WORKDIR$dir"
@@ -197,7 +171,7 @@ check_sensitive_dirs() {
   done
 }
 
-# === 9. Проверка на устаревшие/небезопасные пакеты ===
+# === 8. Проверка на устаревшие/небезопасные пакеты ===
 check_vuln_packages() {
   log_info "Проверка на наличие известных небезопасных пакетов..."
   # Список известных опасных библиотек (добавь по мере необходимости)
@@ -217,7 +191,6 @@ check_base_os
 check_distroless
 check_suid_sgid
 check_su_sudo
-check_secrets
 check_entrypoint_root
 check_sensitive_dirs
 check_vuln_packages
