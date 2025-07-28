@@ -32,13 +32,17 @@ bash rootless-docker-audit.sh
 - Поиск su/sudo бинарей
 - Проверка запуска root-процессов в ENTRYPOINT/CMD
 - Проверка разрешений на чувствительные каталоги (/etc, /var, /root, /home)
-- Поиск устаревших или небезопасных библиотек (например, libc.so.5, openssl-1.0 и др.)
 
 ## Использование
 ```bash
 ./docker_image_sec_check.sh <image_name>
 
 # где <image_name> — имя или ID вашего Docker-образа (например, myrepo/myimage:latest)
+```
+```bash
+./docker_image_sec_check.sh -f images.txt
+
+# где images.txt — файл, в котором каждый образ на своей строке
 ```
 
 ---
