@@ -16,7 +16,7 @@ log_fail()  { echo -e "${RED}[FAIL]${NC} $*"; }
 log_warn()  { echo -e "${YELLOW}[WARN]${NC} $*"; }
 log_info()  { echo -e "${YELLOW}[INFO]${NC} $*"; }
 
-REQUIRED_CMDS=(docker tar grep find head cut tr sed awk)
+REQUIRED_CMDS=(docker tar grep find head cut tr sed awk trivy)
 for cmd in "${REQUIRED_CMDS[@]}"; do
   command -v "$cmd" &>/dev/null || { echo "Не найдено: $cmd"; exit 2; }
 done
@@ -37,7 +37,7 @@ if [[ "$1" == "-f" ]]; then
   [[ $# -ne 2 ]] && show_usage
   [[ ! -f "$2" ]] && { echo "Файл не найден: $2"; exit 2; }
   # Пропускаем пустые строки и комментарии
-  while IFS= read -r line; do
+  while IFS= read -r line || [[ -n "$line" ]]; do
     [[ -z "$line" || "$line" =~ ^# ]] && continue
     IMAGES+=("$line")
   done < "$2"
@@ -45,13 +45,45 @@ else
   IMAGES=("$1")
 fi
 
-# ==== Все проверки в функции, чтобы изолировать окружение ====
+TRIVY_DB_URL_DEFAULT=""
+CONFIG_FILE=""
+if [[ -n "${AUDIT_CONFIG:-}" ]]; then
+  CONFIG_FILE="$AUDIT_CONFIG"
+elif [[ -f "./audit.conf" ]]; then
+  CONFIG_FILE="./audit.conf"
+fi
+
+if [[ -n "$CONFIG_FILE" ]]; then
+  log_info "Загружаю конфиг $CONFIG_FILE"
+  source "$CONFIG_FILE"
+fi
+
+if [[ -n "${TRIVY_DB_URL:-}" ]]; then
+  export TRIVY_DB_REPOSITORY="$TRIVY_DB_URL"
+fi
+
+
+run_check() {
+  local check_func="$1"
+  shift
+  set +e
+  "$check_func" "$@"
+  local status=$?
+  set -e
+  if [[ $status -ne 0 ]]; then
+    log_warn "Проверка ${check_func} не выполнена (код $status)"
+  fi
+}
+
 check_image() {
   local IMAGE="$1"
-  echo -e "\n${YELLOW}====== Проверка образа: $IMAGE ======${NC}"
+  echo -e "\n${YELLOW}============================================"
+  echo    "   Проверка Docker-образа: $IMAGE"
+  echo -e "============================================${NC}\n"
 
+  REPORT_DIR="$(pwd)"
   WORKDIR=$(mktemp -d)
-  CONTAINER_ID=$(docker create "$IMAGE") || { log_fail "Не удалось создать контейнер из образа: $IMAGE"; rm -rf "$WORKDIR"; return; }
+  CONTAINER_ID=$(docker create "$IMAGE") || { log_fail "Не удалось создать контейнер из образа: $IMAGE"; rm -rf "$WORKDIR"; return 1; }
 
   cleanup() {
     docker rm -f "$CONTAINER_ID" &>/dev/null || true
@@ -59,11 +91,11 @@ check_image() {
   }
   trap cleanup EXIT
 
-  docker export "$CONTAINER_ID" | tar -C "$WORKDIR" -xf -
+  docker export "$CONTAINER_ID" | tar -C "$WORKDIR" -xf - || return 1
 
   # === 1. Проверка пользователя по умолчанию ===
   check_user() {
-    USER_LINE=$(docker inspect --format '{{.Config.User}}' "$IMAGE")
+    USER_LINE=$(docker inspect --format '{{.Config.User}}' "$IMAGE") || return 1
     if [[ -z "$USER_LINE" || "$USER_LINE" == "root" || "$USER_LINE" == "0" ]]; then
       log_fail "USER по умолчанию не задан или равен root/0"
     else
@@ -84,19 +116,20 @@ check_image() {
         fi
       fi
     fi
+    return 0
   }
 
   # === 2. Проверка базового дистрибутива ===
   check_base_os() {
     BASE_OS=$(grep -iEr 'redos|astralinux|alt' "$WORKDIR"/etc/*-release 2>/dev/null | head -1 || true)
     BASE_OS_REL=$(echo "$BASE_OS" | sed "s|$WORKDIR||")
-    # Приводим к нижнему регистру для проверки
     BASE_OS_CHECK=$(echo "$BASE_OS" | tr '[:upper:]' '[:lower:]')
     if [[ "$BASE_OS_CHECK" =~ (redos|astralinux|alt) ]]; then
       log_ok "Базовый дистрибутив: $BASE_OS_REL"
     else
       log_fail "Базовый дистрибутив не Red OS / Astra Linux / ALT. Найдено: ${BASE_OS_REL:-'не найдено'}"
     fi
+    return 0
   }
 
   # === 3. Проверка на distroless ===
@@ -126,6 +159,7 @@ check_image() {
       log_fail "Образ не похож на distroless, найдено:"
       for fail in "${DISTROLESS_FAILS[@]}"; do echo "    $fail"; done
     fi
+    return 0
   }
 
   # === 4. SUID/SGID ===
@@ -142,6 +176,7 @@ check_image() {
     else
       log_ok "Файлы с SGID отсутствуют"
     fi
+    return 0
   }
 
   # === 5. su/sudo ===
@@ -153,6 +188,7 @@ check_image() {
     else
       log_ok "su/sudo не найдены"
     fi
+    return 0
   }
 
   # === 6. Проверка на наличие root-процессов в ENTRYPOINT/CMD ===
@@ -173,40 +209,80 @@ check_image() {
     else
       log_ok "Стартовые процессы запускаются НЕ под root (USER: $USER)"
     fi
+    return 0
   }
 
   # === 7. Проверка разрешений на чувствительные каталоги ===
   check_sensitive_dirs() {
+    get_perms() {
+      local path="$1"
+      if stat -f "%p" "$path" >/dev/null 2>&1; then
+        stat -f "%Lp" "$path" | awk '{print substr($0,length($0)-2,3)}'
+      elif stat -c "%a" "$path" >/dev/null 2>&1; then
+        stat -c "%a" "$path"
+      else
+        echo "???"
+      fi
+    }
     for dir in /etc /var /root /home; do
       DIRPATH="$WORKDIR$dir"
       [[ -d "$DIRPATH" ]] || continue
-      perms=$(stat -c "%a" "$DIRPATH")
+      perms=$(get_perms "$DIRPATH")
+      if [[ "$perms" == "???" ]]; then
+        log_warn "Не удалось определить права для каталога $dir"
+        continue
+      fi
       if [[ "$perms" -gt 755 ]]; then
         log_fail "Каталог $dir имеет небезопасные разрешения: $perms"
       else
         log_ok "Каталог $dir разрешения: $perms"
       fi
     done
+    return 0
+  }
+
+  # === 8. Проверка trivy ===
+  check_trivy() {
+    log_info "Запуск Trivy для образа $IMAGE..."
+
+    local image_name_sanitized
+    image_name_sanitized=$(echo "$IMAGE" | tr '/:' '_')
+    local trivy_report="$REPORT_DIR/trivy_report_${image_name_sanitized}.json"
+
+    trivy image --skip-db-update --quiet --format json --offline-scan "$IMAGE" > "$trivy_report" 2>/dev/null
+
+    # Считаем количество HIGH/CRITICAL, MEDIUM/LOW
+    local high_count
+    high_count=$(jq '[.. | objects | select(.Severity=="HIGH" or .Severity=="CRITICAL")] | length' "$trivy_report")
+    local medlow_count
+    medlow_count=$(jq '[.. | objects | select(.Severity=="MEDIUM" or .Severity=="LOW")] | length' "$trivy_report")
+
+    if [[ "$high_count" -gt 0 ]]; then
+      log_fail "Trivy: обнаружены HIGH/CRITICAL уязвимости! (подробный отчёт: $trivy_report)"
+    elif [[ "$medlow_count" -gt 0 ]]; then
+      log_warn "Trivy: HIGH/CRITICAL не найдено, но обнаружены MEDIUM/LOW уязвимости (см. отчёт: $trivy_report)"
+    else
+      [[ -f "$trivy_report" ]] && rm -f "$trivy_report"
+      log_ok "Trivy: HIGH/CRITICAL/MEDIUM/LOW уязвимости не обнаружены"
+    fi
+    return 0
   }
 
   # === Запуск всех проверок ===
-  check_user
-  check_base_os
-  check_distroless
-  check_suid_sgid
-  check_su_sudo
-  check_entrypoint_root
-  check_sensitive_dirs
+  run_check check_user
+  run_check check_base_os
+  run_check check_distroless
+  run_check check_suid_sgid
+  run_check check_su_sudo
+  run_check check_entrypoint_root
+  run_check check_sensitive_dirs
+  run_check check_trivy
 
-  # Гарантируем очистку даже при exit из trap
   trap - EXIT
   cleanup
 }
 
 # ==== Запуск для всех образов ====
 for IMAGE in "${IMAGES[@]}"; do
-  echo -e "\n${YELLOW}============================================"
-  echo    "   Проверка Docker-образа: $IMAGE"
-  echo -e "============================================${NC}\n"
   check_image "$IMAGE"
 done
