@@ -123,14 +123,24 @@ check_image() {
   check_base_os() {
     BASE_OS=$(grep -iEr 'redos|astralinux|alt' "$WORKDIR"/etc/*-release 2>/dev/null | head -1 || true)
     BASE_OS_REL=$(echo "$BASE_OS" | sed "s|$WORKDIR||")
-    BASE_OS_CHECK=$(echo "$BASE_OS" | tr '[:upper:]' '[:lower:]')
-    if [[ "$BASE_OS_CHECK" =~ (redos|astralinux|alt) ]]; then
-      log_ok "Базовый дистрибутив: $BASE_OS_REL"
+    if [[ -n "$BASE_OS_REL" ]]; then
+      BASE_OS_CHECK=$(echo "$BASE_OS_REL" | tr '[:upper:]' '[:lower:]')
+      if [[ "$BASE_OS_CHECK" =~ (redos|astralinux|alt) ]]; then
+        log_ok "Базовый дистрибутив: $BASE_OS_REL"
+      else
+        log_fail "Базовый дистрибутив не Red OS / Astra Linux / ALT. Найдено: $BASE_OS_REL"
+      fi
     else
-      log_fail "Базовый дистрибутив не Red OS / Astra Linux / ALT. Найдено: ${BASE_OS_REL:-'не найдено'}"
+      OTHER_OS=$(grep -iE 'id=|distr|os=' "$WORKDIR"/etc/*-release 2>/dev/null | head -1 | sed "s|$WORKDIR||")
+      if [[ -n "$OTHER_OS" ]]; then
+        log_fail "Базовый дистрибутив не Red OS / Astra Linux / ALT. Найдено: $OTHER_OS"
+      else
+        log_fail "Базовый дистрибутив не Red OS / Astra Linux / ALT. Найдено: ничего не найдено"
+      fi
     fi
     return 0
   }
+
 
   # === 3. Проверка на distroless ===
   check_distroless() {
@@ -143,15 +153,15 @@ check_image() {
       DISTROLESS_FAILS+=("Найдены shell-утилиты:")
       while read -r f; do [[ -n "$f" ]] && DISTROLESS_FAILS+=("${f#$WORKDIR}"); done <<< "$FOUND_SHELLS"
     fi
-    FOUND_PKG=$(find "$WORKDIR" -type f \( -name 'apt' -o -name 'yum' -o -name 'dnf' \) 2>/dev/null)
-    FOUND_CURL=$(find "$WORKDIR" -type f -name 'curl' 2>/dev/null)
-    FOUND_WGET=$(find "$WORKDIR" -type f -name 'wget' 2>/dev/null)
-    if [[ -z "$FOUND_PKG" && -z "$FOUND_CURL" && -z "$FOUND_WGET" ]]; then
+    FOUND_PKG=$(find "$WORKDIR" -type f \( -name 'apt' -o -name 'yum' -o -name 'dnf' -o -name 'apk' \) 2>/dev/null)
+    FOUND_CURL_WGET=$(find "$WORKDIR" -type f \( -name 'curl' -o -name 'wget' \) 2>/dev/null)
+    FOUND_BUSYBOX=$(find "$WORKDIR" -type f -name 'busybox' 2>/dev/null)
+    if [[ -z "$FOUND_PKG" && -z "$FOUND_CURL_WGET" && -z "$FOUND_BUSYBOX" ]]; then
       ((DISTROLESS_SCORE++))
     else
       [[ -n "$FOUND_PKG" ]] && DISTROLESS_FAILS+=("Найдены package manager-утилиты: $(echo "$FOUND_PKG" | sed "s|$WORKDIR||g")")
-      [[ -n "$FOUND_CURL" ]] && DISTROLESS_FAILS+=("Найден curl: $(echo "$FOUND_CURL" | sed "s|$WORKDIR||g")")
-      [[ -n "$FOUND_WGET" ]] && DISTROLESS_FAILS+=("Найден wget: $(echo "$FOUND_WGET" | sed "s|$WORKDIR||g")")
+      [[ -n "$FOUND_CURL_WGET" ]] && DISTROLESS_FAILS+=("Найден curl/wget: $(echo "$FOUND_CURL_WGET" | sed "s|$WORKDIR||g")")
+      [[ -n "$FOUND_BUSYBOX" ]] && DISTROLESS_FAILS+=("Найден busybox: $(echo "$FOUND_BUSYBOX" | sed "s|$WORKDIR||g")")
     fi
     if [[ "$DISTROLESS_SCORE" -ge 2 ]]; then
       log_ok "Образ, скорее всего, distroless"
@@ -161,6 +171,7 @@ check_image() {
     fi
     return 0
   }
+
 
   # === 4. SUID/SGID ===
   check_suid_sgid() {

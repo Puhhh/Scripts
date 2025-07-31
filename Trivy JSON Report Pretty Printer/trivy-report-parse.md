@@ -1,4 +1,4 @@
-# Trivy JSON Report Pretty Printer
+# Trivy Report Parse
 Скрипт облегчает разбор и анализ отчетов безопасности, сгенерированных [Trivy](https://github.com/aquasecurity/trivy) в формате JSON.  
 
 ## Возможности
