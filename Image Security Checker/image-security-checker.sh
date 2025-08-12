@@ -54,7 +54,6 @@ IMAGES=()
 if [[ "$1" == "-f" ]]; then
   [[ $# -ne 2 ]] && show_usage
   [[ ! -f "$2" ]] && { echo "Файл не найден: $2"; exit 2; }
-  # Пропускаем пустые строки и комментарии
   while IFS= read -r line || [[ -n "$line" ]]; do
     [[ -z "$line" || "$line" =~ ^# ]] && continue
     IMAGES+=("$line")
@@ -245,6 +244,16 @@ check_image() {
     return 0
   }
 
+  # === 8. Проверка наличия потенциально чувствительных файлов ===
+  check_sensitive_files() {
+    FOUND=$(find "$WORKDIR" -type f \( -name ".npmrc" -o -name ".gitconfig" -o -name "id_rsa" -o -name "config" \) 2>/dev/null)
+    if [[ -n "$FOUND" ]]; then
+      log_fail "Обнаружены потенциально чувствительные файлы:\n$FOUND"
+    else
+      log_ok "Чувствительные файлы не найдены"
+    fi
+  }
+
   # === Запуск всех проверок ===
   run_check check_user
   run_check check_base_os
@@ -253,6 +262,8 @@ check_image() {
   run_check check_su_sudo
   run_check check_entrypoint_root
   run_check check_sensitive_dirs
+  run_check check_sensitive_files
+
   trap - EXIT
   cleanup
 }
