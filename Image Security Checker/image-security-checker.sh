@@ -16,10 +16,28 @@ log_fail()  { echo -e "${RED}[FAIL]${NC} $*"; }
 log_warn()  { echo -e "${YELLOW}[WARN]${NC} $*"; }
 log_info()  { echo -e "${YELLOW}[INFO]${NC} $*"; }
 
-REQUIRED_CMDS=(docker tar grep find head cut tr sed awk )
+WORKDIR=""
+CONTAINER_ID=""
+
+cleanup() {
+  if [[ -n "$CONTAINER_ID" ]]; then
+    docker rm -f "$CONTAINER_ID" &>/dev/null || true
+  fi
+  if [[ -n "$WORKDIR" && -d "$WORKDIR" ]]; then
+    rm -rf "$WORKDIR"
+  fi
+}
+trap cleanup EXIT
+
+REQUIRED_CMDS=(docker tar grep find cut tr sed awk stat)
 for cmd in "${REQUIRED_CMDS[@]}"; do
   command -v "$cmd" &>/dev/null || { echo "Не найдено: $cmd"; exit 2; }
 done
+
+if ! docker info &>/dev/null; then
+  log_fail "Docker демон не запущен или недоступен"
+  exit 2
+fi
 
 show_usage() {
   echo "Usage: $0 <image_name> | -f <image_list_file>"
@@ -63,15 +81,8 @@ check_image() {
   echo    "   Проверка Docker-образа: $IMAGE"
   echo -e "============================================${NC}\n"
 
-  REPORT_DIR="$(pwd)"
   WORKDIR=$(mktemp -d)
-  CONTAINER_ID=$(docker create "$IMAGE") || { log_fail "Не удалось создать контейнер из образа: $IMAGE"; rm -rf "$WORKDIR"; return 1; }
-
-  cleanup() {
-    docker rm -f "$CONTAINER_ID" &>/dev/null || true
-    rm -rf "$WORKDIR"
-  }
-  trap cleanup EXIT
+  CONTAINER_ID=$(docker create "$IMAGE") || { log_fail "Не удалось создать контейнер из образа $IMAGE"; return; }
 
   docker export "$CONTAINER_ID" | tar -C "$WORKDIR" -xf - || return 1
 
