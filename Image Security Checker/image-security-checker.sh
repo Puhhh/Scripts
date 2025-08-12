@@ -16,7 +16,7 @@ log_fail()  { echo -e "${RED}[FAIL]${NC} $*"; }
 log_warn()  { echo -e "${YELLOW}[WARN]${NC} $*"; }
 log_info()  { echo -e "${YELLOW}[INFO]${NC} $*"; }
 
-REQUIRED_CMDS=(docker tar grep find head cut tr sed awk trivy)
+REQUIRED_CMDS=(docker tar grep find head cut tr sed awk )
 for cmd in "${REQUIRED_CMDS[@]}"; do
   command -v "$cmd" &>/dev/null || { echo "Не найдено: $cmd"; exit 2; }
 done
@@ -44,24 +44,6 @@ if [[ "$1" == "-f" ]]; then
 else
   IMAGES=("$1")
 fi
-
-TRIVY_DB_URL_DEFAULT=""
-CONFIG_FILE=""
-if [[ -n "${AUDIT_CONFIG:-}" ]]; then
-  CONFIG_FILE="$AUDIT_CONFIG"
-elif [[ -f "./audit.conf" ]]; then
-  CONFIG_FILE="./audit.conf"
-fi
-
-if [[ -n "$CONFIG_FILE" ]]; then
-  log_info "Загружаю конфиг $CONFIG_FILE"
-  source "$CONFIG_FILE"
-fi
-
-if [[ -n "${TRIVY_DB_URL:-}" ]]; then
-  export TRIVY_DB_REPOSITORY="$TRIVY_DB_URL"
-fi
-
 
 run_check() {
   local check_func="$1"
@@ -252,33 +234,6 @@ check_image() {
     return 0
   }
 
-  # === 8. Проверка trivy ===
-  check_trivy() {
-    log_info "Запуск Trivy для образа $IMAGE..."
-
-    local image_name_sanitized
-    image_name_sanitized=$(echo "$IMAGE" | tr '/:' '_')
-    local trivy_report="$REPORT_DIR/trivy_report_${image_name_sanitized}.json"
-
-    trivy image --skip-db-update --quiet --format json --offline-scan "$IMAGE" > "$trivy_report" 2>/dev/null
-
-    # Считаем количество HIGH/CRITICAL, MEDIUM/LOW
-    local high_count
-    high_count=$(jq '[.. | objects | select(.Severity=="HIGH" or .Severity=="CRITICAL")] | length' "$trivy_report")
-    local medlow_count
-    medlow_count=$(jq '[.. | objects | select(.Severity=="MEDIUM" or .Severity=="LOW")] | length' "$trivy_report")
-
-    if [[ "$high_count" -gt 0 ]]; then
-      log_fail "Trivy: обнаружены HIGH/CRITICAL уязвимости! (подробный отчёт: $trivy_report)"
-    elif [[ "$medlow_count" -gt 0 ]]; then
-      log_warn "Trivy: HIGH/CRITICAL не найдено, но обнаружены MEDIUM/LOW уязвимости (см. отчёт: $trivy_report)"
-    else
-      [[ -f "$trivy_report" ]] && rm -f "$trivy_report"
-      log_ok "Trivy: HIGH/CRITICAL/MEDIUM/LOW уязвимости не обнаружены"
-    fi
-    return 0
-  }
-
   # === Запуск всех проверок ===
   run_check check_user
   run_check check_base_os
@@ -287,8 +242,6 @@ check_image() {
   run_check check_su_sudo
   run_check check_entrypoint_root
   run_check check_sensitive_dirs
-  run_check check_trivy
-
   trap - EXIT
   cleanup
 }
