@@ -246,12 +246,13 @@ check_image() {
 
   # === 8. Проверка наличия потенциально чувствительных файлов ===
   check_sensitive_files() {
-    FOUND=$(find "$WORKDIR" -type f \( -name ".npmrc" -o -name ".gitconfig" -o -name "id_rsa" -o -name "config" \) 2>/dev/null)
-    if [[ -n "$FOUND" ]]; then
-      log_fail "Обнаружены потенциально чувствительные файлы:\n$FOUND"
-    else
-      log_ok "Чувствительные файлы не найдены"
-    fi
+      FOUND=$(find "$WORKDIR" -type f \( -name ".npmrc" -o -name ".gitconfig" -o -name "id_rsa" -o -name "config" \) 2>/dev/null)
+      if [[ -n "$FOUND" ]]; then
+        log_fail "Обнаружены потенциально чувствительные файлы:"
+        echo "$FOUND" | sed "s|$WORKDIR||g"
+      else
+        log_ok "Чувствительные файлы не найдены"
+      fi
   }
 
   # === Запуск всех проверок ===
