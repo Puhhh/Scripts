@@ -18,6 +18,7 @@ log_info()  { echo -e "${YELLOW}[INFO]${NC} $*"; }
 
 WORKDIR=""
 CONTAINER_ID=""
+IS_RUS_OS=0
 
 cleanup() {
   if [[ -n "$CONTAINER_ID" ]]; then
@@ -113,57 +114,78 @@ check_image() {
 
   # === 2. Проверка базового дистрибутива ===
   check_base_os() {
-    BASE_OS=$(grep -iEr 'redos|astralinux|alt' "$WORKDIR"/etc/*-release 2>/dev/null | head -1 || true)
-    BASE_OS_REL=$(echo "$BASE_OS" | sed "s|$WORKDIR||")
-    if [[ -n "$BASE_OS_REL" ]]; then
-      BASE_OS_CHECK=$(echo "$BASE_OS_REL" | tr '[:upper:]' '[:lower:]')
-      if [[ "$BASE_OS_CHECK" =~ (redos|astralinux|alt) ]]; then
-        log_ok "Базовый дистрибутив: $BASE_OS_REL"
+      BASE_OS=$(grep -iEr 'redos|astralinux|alt' "$WORKDIR"/etc/*-release 2>/dev/null | head -1 || true)
+      BASE_OS_REL=$(echo "$BASE_OS" | sed "s|$WORKDIR||")
+      if [[ -n "$BASE_OS_REL" ]]; then
+        BASE_OS_CHECK=$(echo "$BASE_OS_REL" | tr '[:upper:]' '[:lower:]')
+        if [[ "$BASE_OS_CHECK" =~ (redos|astralinux|alt) ]]; then
+          IS_RUS_OS=1
+          log_ok "Базовый дистрибутив: $BASE_OS_REL"
+        else
+          IS_RUS_OS=0
+          log_fail "Базовый дистрибутив не Red OS / Astra Linux / ALT. Найдено: $BASE_OS_REL"
+        fi
       else
-        log_fail "Базовый дистрибутив не Red OS / Astra Linux / ALT. Найдено: $BASE_OS_REL"
+        IS_RUS_OS=0
+        OTHER_OS=$(grep -iE 'id=|distr|os=' "$WORKDIR"/etc/*-release 2>/dev/null | head -1 | sed "s|$WORKDIR||")
+        if [[ -n "$OTHER_OS" ]]; then
+          log_fail "Базовый дистрибутив не Red OS / Astra Linux / ALT. Найдено: $OTHER_OS"
+        else
+          log_fail "Базовый дистрибутив не Red OS / Astra Linux / ALT. Найдено: ничего не найдено"
+        fi
       fi
-    else
-      OTHER_OS=$(grep -iE 'id=|distr|os=' "$WORKDIR"/etc/*-release 2>/dev/null | head -1 | sed "s|$WORKDIR||")
-      if [[ -n "$OTHER_OS" ]]; then
-        log_fail "Базовый дистрибутив не Red OS / Astra Linux / ALT. Найдено: $OTHER_OS"
-      else
-        log_fail "Базовый дистрибутив не Red OS / Astra Linux / ALT. Найдено: ничего не найдено"
-      fi
-    fi
-    return 0
+      return 0
   }
 
 
   # === 3. Проверка на distroless ===
   check_distroless() {
-    DISTROLESS_SCORE=0
-    DISTROLESS_FAILS=()
-    FOUND_SHELLS=$(find "$WORKDIR" -type f \( -name 'sh' -o -name 'bash' -o -name 'dash' \) 2>/dev/null)
-    if [[ -z "$FOUND_SHELLS" ]]; then
-      ((DISTROLESS_SCORE++))
-    else
-      DISTROLESS_FAILS+=("Найдены shell-утилиты:")
-      while read -r f; do [[ -n "$f" ]] && DISTROLESS_FAILS+=("${f#$WORKDIR}"); done <<< "$FOUND_SHELLS"
-    fi
-    FOUND_PKG=$(find "$WORKDIR" -type f \( -name 'apt' -o -name 'yum' -o -name 'dnf' -o -name 'apk' \) 2>/dev/null)
-    FOUND_CURL_WGET=$(find "$WORKDIR" -type f \( -name 'curl' -o -name 'wget' \) 2>/dev/null)
-    FOUND_BUSYBOX=$(find "$WORKDIR" -type f -name 'busybox' 2>/dev/null)
-    if [[ -z "$FOUND_PKG" && -z "$FOUND_CURL_WGET" && -z "$FOUND_BUSYBOX" ]]; then
-      ((DISTROLESS_SCORE++))
-    else
-      [[ -n "$FOUND_PKG" ]] && DISTROLESS_FAILS+=("Найдены package manager-утилиты: $(echo "$FOUND_PKG" | sed "s|$WORKDIR||g")")
-      [[ -n "$FOUND_CURL_WGET" ]] && DISTROLESS_FAILS+=("Найден curl/wget: $(echo "$FOUND_CURL_WGET" | sed "s|$WORKDIR||g")")
-      [[ -n "$FOUND_BUSYBOX" ]] && DISTROLESS_FAILS+=("Найден busybox: $(echo "$FOUND_BUSYBOX" | sed "s|$WORKDIR||g")")
-    fi
-    if [[ "$DISTROLESS_SCORE" -ge 2 ]]; then
-      log_ok "Образ, скорее всего, distroless"
-    else
-      log_fail "Образ не похож на distroless, найдено:"
-      for fail in "${DISTROLESS_FAILS[@]}"; do echo "    $fail"; done
-    fi
-    return 0
+      DISTROLESS_SCORE=0
+      DISTROLESS_FAILS=()
+      FOUND_SHELLS=$(find "$WORKDIR" -type f \( -name 'sh' -o -name 'bash' -o -name 'dash' \) 2>/dev/null)
+      if [[ -z "$FOUND_SHELLS" ]]; then
+        ((DISTROLESS_SCORE++))
+      else
+        DISTROLESS_FAILS+=("Найдены shell-утилиты:")
+        while read -r f; do [[ -n "$f" ]] && DISTROLESS_FAILS+=("${f#$WORKDIR}"); done <<< "$FOUND_SHELLS"
+      fi
+      FOUND_PKG=$(find "$WORKDIR" -type f \( -name 'apt' -o -name 'yum' -o -name 'dnf' -o -name 'apk' \) 2>/dev/null)
+      FOUND_CURL_WGET=$(find "$WORKDIR" -type f \( -name 'curl' -o -name 'wget' \) 2>/dev/null)
+      FOUND_BUSYBOX=$(find "$WORKDIR" -type f -name 'busybox' 2>/dev/null)
+      if [[ -z "$FOUND_PKG" && -z "$FOUND_CURL_WGET" && -z "$FOUND_BUSYBOX" ]]; then
+        ((DISTROLESS_SCORE++))
+      else
+        [[ -n "$FOUND_PKG" ]] && DISTROLESS_FAILS+=("Найдены package manager-утилиты:") \
+          && while read -r f; do [[ -n "$f" ]] && DISTROLESS_FAILS+=("${f#$WORKDIR}"); done <<< "$FOUND_PKG"
+        [[ -n "$FOUND_CURL_WGET" ]] && DISTROLESS_FAILS+=("Найден curl/wget:") \
+          && while read -r f; do [[ -n "$f" ]] && DISTROLESS_FAILS+=("${f#$WORKDIR}"); done <<< "$FOUND_CURL_WGET"
+        [[ -n "$FOUND_BUSYBOX" ]] && DISTROLESS_FAILS+=("Найден busybox:") \
+          && while read -r f; do [[ -n "$f" ]] && DISTROLESS_FAILS+=("${f#$WORKDIR}"); done <<< "$FOUND_BUSYBOX"
+      fi
+      if [[ "$DISTROLESS_SCORE" -ge 2 ]]; then
+        log_ok "Образ, скорее всего, distroless"
+      else
+        if [[ "$IS_RUS_OS" == "1" ]]; then
+          log_warn "Образ не похож на distroless, найдено:"
+        else
+          log_fail "Образ не похож на distroless, найдено:"
+        fi
+        local prev_title=""
+        for fail in "${DISTROLESS_FAILS[@]}"; do 
+          if [[ "$fail" =~ :$ ]]; then
+            prev_title="$fail"
+            echo "    $fail"
+          else
+            if [[ -n "$prev_title" ]]; then
+              echo "        $fail"
+            else
+              echo "    $fail"
+            fi
+          fi
+        done
+      fi
+      return 0
   }
-
 
   # === 4. SUID/SGID ===
   check_suid_sgid() {
@@ -184,7 +206,19 @@ check_image() {
 
   # === 5. su/sudo ===
   check_su_sudo() {
-    PRIV_CMDS=$(find "$WORKDIR" -type f \( -name 'su' -o -name 'sudo' \) -executable 2>/dev/null)
+    PRIV_CMDS=$(find "$WORKDIR" -type f \( -name 'su' -o -name 'sudo' \) \
+      \( -perm -u+x -o -perm -g+x -o -perm -o+x \) 2>/dev/null)
+
+    if [[ -z "$PRIV_CMDS" ]]; then
+      while IFS= read -r f; do
+        [[ -n "$f" && -x "$f" ]] && echo "$f"
+      done < <(find "$WORKDIR" -type f \( -name 'su' -o -name 'sudo' \) 2>/dev/null) \
+      | sed "s|$WORKDIR||g" >"$WORKDIR/.su_sudo_found"
+      if [[ -s "$WORKDIR/.su_sudo_found" ]]; then
+        PRIV_CMDS=$(cat "$WORKDIR/.su_sudo_found")
+      fi
+    fi
+
     if [[ -n "$PRIV_CMDS" ]]; then
       log_fail "Найдены потенциально опасные исполняемые файлы (su/sudo):"
       echo "$PRIV_CMDS" | sed "s|$WORKDIR||g"
@@ -246,7 +280,7 @@ check_image() {
 
   # === 8. Проверка наличия потенциально чувствительных файлов ===
   check_sensitive_files() {
-      FOUND=$(find "$WORKDIR" -type f \( -name ".npmrc" -o -name ".gitconfig" -o -name "id_rsa" -o -name "config" \) 2>/dev/null)
+      FOUND=$(find "$WORKDIR" -type f \( -name ".npmrc" -o -name ".gitconfig" -o -name "id_rsa" \) 2>/dev/null)
       if [[ -n "$FOUND" ]]; then
         log_fail "Обнаружены потенциально чувствительные файлы:"
         echo "$FOUND" | sed "s|$WORKDIR||g"
