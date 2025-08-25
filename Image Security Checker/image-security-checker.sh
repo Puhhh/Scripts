@@ -30,9 +30,9 @@ cleanup() {
 }
 trap cleanup EXIT
 
-REQUIRED_CMDS=(docker tar grep find cut tr sed awk stat)
+REQUIRED_CMDS=(docker tar awk stat)
 for cmd in "${REQUIRED_CMDS[@]}"; do
-  command -v "$cmd" &>/dev/null || { echo "Не найдено: $cmd"; exit 2; }
+  command -v "$cmd" &>/dev/null || { log_fail "Не найдено: $cmd"; exit 2; }
 done
 
 if ! docker info &>/dev/null; then
@@ -84,11 +84,11 @@ check_image() {
   WORKDIR=$(mktemp -d)
   CONTAINER_ID=$(docker create "$IMAGE") || { log_fail "Не удалось создать контейнер из образа $IMAGE"; return; }
 
-  docker export "$CONTAINER_ID" | tar -C "$WORKDIR" -xf - || return 1
+  docker export "$CONTAINER_ID" | tar -C "$WORKDIR" -xf - || { log_fail "Ошибка экспорта контейнера $CONTAINER_ID"; return 1; }
 
   # === 1. Проверка пользователя по умолчанию ===
   check_user() {
-    USER_LINE=$(docker inspect --format '{{.Config.User}}' "$IMAGE") || return 1
+    USER_LINE=$(docker inspect --format '{{.Config.User}}' "$IMAGE") || { log_fail "Ошибка docker inspect для $IMAGE"; return 1; }
     if [[ -z "$USER_LINE" || "$USER_LINE" == "root" || "$USER_LINE" == "0" ]]; then
       log_fail "USER по умолчанию не задан или равен root/0"
     else
@@ -299,7 +299,6 @@ check_image() {
   run_check check_sensitive_dirs
   run_check check_sensitive_files
 
-  trap - EXIT
   cleanup
 }
 
