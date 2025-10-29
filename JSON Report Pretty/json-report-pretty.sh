@@ -4,11 +4,7 @@ set -e
 
 usage() {
   cat <<EOF
-Usage: $0 <config|vuln> <trivy-json-report.json> [--min-severity=LEVEL]
-
-Modes:
-  config     Show misconfigurations (policy violations)
-  vuln       Show vulnerabilities (Trivy or Grype JSON)
+Usage: $0 <trivy-json-report.json> [--min-severity=LEVEL]
 
 Options:
   --min-severity=LEVEL   Minimum severity to display (CRITICAL|HIGH|MEDIUM|LOW|NEGLIGIBLE|UNKNOWN)
@@ -16,15 +12,14 @@ EOF
 }
 
 # Если нет обязательных параметров — показать usage
-if [[ $# -lt 2 ]]; then
+if [[ $# -lt 1 ]]; then
   usage
   exit 1
 fi
 
-MODE=$1
-FILE=$2
+FILE=$1
 MIN_SEV="LOW"
-shift 2
+shift
 
 # Parse extra options
 for arg in "$@"; do
@@ -51,10 +46,6 @@ case "$MIN_SEV" in
     exit 1
     ;;
 esac
-
-if [[ "$MODE" != "config" && "$MODE" != "vuln" ]]; then
-  usage; exit 1
-fi
 
 if [[ ! -f "$FILE" ]]; then
   echo -e "\033[1;31m❌ File not found: $FILE\033[0m"
@@ -102,125 +93,93 @@ print_table_with_colors() {
   done | column -t -s $'\t'
 }
 
-case "$MODE" in
-  config)
-    echo -e "\033[1;36m🔧 Misconfigurations:\033[0m"
-    COUNT=$(jq --arg min_sev "$MIN_SEV" --argjson order "$SEVERITY_JQ_OBJ" '
-      [ .Results[]?.Misconfigurations[]?
-        | select(($order[.Severity] // 6) <= ($order[$min_sev] // 4))
-      ] | length
-    ' "$FILE")
-    if [[ $COUNT -eq 0 ]]; then
-      echo -e "\033[1;32m✅ No misconfigurations found (severity >= $MIN_SEV).\033[0m"
-      exit 0
-    fi
-    jq -r --arg min_sev "$MIN_SEV" --argjson order "$SEVERITY_JQ_OBJ" '
-      [ .Results[]?.Misconfigurations[]?
-        | select(($order[.Severity] // 6) <= ($order[$min_sev] // 4))
-        | {
-          id: .ID,
-          severity: .Severity,
-          title: .Title,
-          message: .Message,
-          resolution: .Resolution
-        }
-      ]
-      | sort_by($order[.severity])
-      | .[]
-      | [ .id, .severity, .title, .message, .resolution ] | @tsv
-    ' "$FILE" | print_table_with_colors 2
-    echo -e "\033[1;36m▶ Total: $COUNT\033[0m"
-    ;;
-  vuln)
-    echo -e "\033[1;36m🛡 Vulnerabilities:\033[0m"
-    if jq -e '.Results? | length > 0' "$FILE" &>/dev/null; then
-      COUNT=$(jq --arg min_sev "$MIN_SEV" --argjson order "$SEVERITY_JQ_OBJ" '
-        def to_upper($s):
-          ($s | tostring | explode
-               | map(if . >= 97 and . <= 122 then . - 32 else . end)
-               | implode);
-        [ .Results[]?.Vulnerabilities[]?
-          | select(($order[to_upper(.Severity // "UNKNOWN")] // 999) <= ($order[$min_sev] // 999))
-        ] | length
-      ' "$FILE")
-      if [[ $COUNT -eq 0 ]]; then
-        echo -e "\033[1;32m✅ No vulnerabilities found (severity >= $MIN_SEV).\033[0m"
-        exit 0
-      fi
-      jq -r --arg min_sev "$MIN_SEV" --argjson order "$SEVERITY_JQ_OBJ" '
-        def to_upper($s):
-          ($s | tostring | explode
-               | map(if . >= 97 and . <= 122 then . - 32 else . end)
-               | implode);
-        [ .Results[]?.Vulnerabilities[]?
-          | select(($order[to_upper(.Severity // "UNKNOWN")] // 999) <= ($order[$min_sev] // 999))
-          | {
-            id: .VulnerabilityID,
-            pkg: .PkgName,
-            ver: .InstalledVersion,
-            severity: (.Severity // "UNKNOWN"),
-            title: (.Title // "N/A")
-          }
-        ]
-        | sort_by($order[to_upper(.severity)])
-        | .[]
-        | [ .id, .pkg, .ver, .severity, .title ] | @tsv
-      ' "$FILE" | print_table_with_colors 4
-      echo -e "\033[1;36m▶ Total: $COUNT\033[0m"
-    elif jq -e '.matches? | length > 0' "$FILE" &>/dev/null; then
-      COUNT=$(jq --arg min_sev "$MIN_SEV" --argjson order "$SEVERITY_JQ_OBJ" '
-        def to_upper($s):
-          ($s | tostring | explode
-               | map(if . >= 97 and . <= 122 then . - 32 else . end)
-               | implode);
-        [ .matches[]?
-          | select(($order[to_upper(.vulnerability.severity // "UNKNOWN")] // 999) <= ($order[$min_sev] // 999))
-        ] | length
-      ' "$FILE")
-      if [[ $COUNT -eq 0 ]]; then
-        echo -e "\033[1;32m✅ No vulnerabilities found (severity >= $MIN_SEV).\033[0m"
-        exit 0
-      fi
-      jq -r --arg min_sev "$MIN_SEV" --argjson order "$SEVERITY_JQ_OBJ" '
-        def to_upper($s):
-          ($s | tostring | explode
-               | map(if . >= 97 and . <= 122 then . - 32 else . end)
-               | implode);
-        def ten_pow($n):
-          reduce range(0; $n) as $i (1; . * 10);
-        def format_fixed($value; $digits):
-          if ($value | type) == "number" then
-            (ten_pow($digits) as $factor
-             | (($value * $factor) | round) / $factor
-             | tostring)
-          else
-            $value | tostring
-          end;
-        [ .matches[]?
-          | select(($order[to_upper(.vulnerability.severity // "UNKNOWN")] // 999) <= ($order[$min_sev] // 999))
-          | {
-            id: .vulnerability.id,
-            pkg: .artifact.name,
-            ver: .artifact.version,
-            severity: (.vulnerability.severity // "UNKNOWN"),
-            epss: format_fixed(.vulnerability.epss[0]?.epss // "N/A"; 5),
-            risk: format_fixed(.vulnerability.risk // "N/A"; 4)
-          }
-        ]
-        | sort_by($order[to_upper(.severity)])
-        | .[]
-        | [ .id,
-            (.pkg // "N/A"),
-            (.ver // "N/A"),
-            .severity,
-            .epss,
-            .risk
-          ] | @tsv
-      ' "$FILE" | print_table_with_colors 4
-      echo -e "\033[1;36m▶ Total: $COUNT\033[0m"
-    else
-      echo -e "\033[1;31m❌ Unsupported report format. Supported: Trivy (.Results) or Grype (.matches).\033[0m"
-      exit 1
-    fi
-    ;;
-esac
+echo -e "\033[1;36m🛡 Vulnerabilities:\033[0m"
+if jq -e '.Results? | length > 0' "$FILE" &>/dev/null; then
+  COUNT=$(jq --arg min_sev "$MIN_SEV" --argjson order "$SEVERITY_JQ_OBJ" '
+    def to_upper($s):
+      ($s | tostring | explode
+           | map(if . >= 97 and . <= 122 then . - 32 else . end)
+           | implode);
+    [ .Results[]?.Vulnerabilities[]?
+      | select(($order[to_upper(.Severity // "UNKNOWN")] // 999) <= ($order[$min_sev] // 999))
+    ] | length
+  ' "$FILE")
+  if [[ $COUNT -eq 0 ]]; then
+    echo -e "\033[1;32m✅ No vulnerabilities found (severity >= $MIN_SEV).\033[0m"
+    exit 0
+  fi
+  jq -r --arg min_sev "$MIN_SEV" --argjson order "$SEVERITY_JQ_OBJ" '
+    def to_upper($s):
+      ($s | tostring | explode
+           | map(if . >= 97 and . <= 122 then . - 32 else . end)
+           | implode);
+    [ .Results[]?.Vulnerabilities[]?
+      | select(($order[to_upper(.Severity // "UNKNOWN")] // 999) <= ($order[$min_sev] // 999))
+      | {
+        id: .VulnerabilityID,
+        pkg: .PkgName,
+        ver: .InstalledVersion,
+        severity: (.Severity // "UNKNOWN"),
+        title: (.Title // "N/A")
+      }
+    ]
+    | sort_by($order[to_upper(.severity)])
+    | .[]
+    | [ .id, .pkg, .ver, .severity, .title ] | @tsv
+  ' "$FILE" | print_table_with_colors 4
+  echo -e "\033[1;36m▶ Total: $COUNT\033[0m"
+elif jq -e '.matches? | length > 0' "$FILE" &>/dev/null; then
+  COUNT=$(jq --arg min_sev "$MIN_SEV" --argjson order "$SEVERITY_JQ_OBJ" '
+    def to_upper($s):
+      ($s | tostring | explode
+           | map(if . >= 97 and . <= 122 then . - 32 else . end)
+           | implode);
+    [ .matches[]?
+      | select(($order[to_upper(.vulnerability.severity // "UNKNOWN")] // 999) <= ($order[$min_sev] // 999))
+    ] | length
+  ' "$FILE")
+  if [[ $COUNT -eq 0 ]]; then
+    echo -e "\033[1;32m✅ No vulnerabilities found (severity >= $MIN_SEV).\033[0m"
+    exit 0
+  fi
+  jq -r --arg min_sev "$MIN_SEV" --argjson order "$SEVERITY_JQ_OBJ" '
+    def to_upper($s):
+      ($s | tostring | explode
+           | map(if . >= 97 and . <= 122 then . - 32 else . end)
+           | implode);
+    def ten_pow($n):
+      reduce range(0; $n) as $i (1; . * 10);
+    def format_fixed($value; $digits):
+      if ($value | type) == "number" then
+        (ten_pow($digits) as $factor
+         | (($value * $factor) | round) / $factor
+         | tostring)
+      else
+        $value | tostring
+      end;
+    [ .matches[]?
+      | select(($order[to_upper(.vulnerability.severity // "UNKNOWN")] // 999) <= ($order[$min_sev] // 999))
+      | {
+        id: .vulnerability.id,
+        pkg: .artifact.name,
+        ver: .artifact.version,
+        severity: (.vulnerability.severity // "UNKNOWN"),
+        epss: format_fixed(.vulnerability.epss[0]?.epss // "N/A"; 5),
+        risk: format_fixed(.vulnerability.risk // "N/A"; 4)
+      }
+    ]
+    | sort_by($order[to_upper(.severity)])
+    | .[]
+    | [ .id,
+        (.pkg // "N/A"),
+        (.ver // "N/A"),
+        .severity,
+        .epss,
+        .risk
+      ] | @tsv
+  ' "$FILE" | print_table_with_colors 4
+  echo -e "\033[1;36m▶ Total: $COUNT\033[0m"
+else
+  echo -e "\033[1;31m❌ Unsupported report format. Supported: Trivy (.Results) or Grype (.matches).\033[0m"
+  exit 1
+fi

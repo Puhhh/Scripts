@@ -3,7 +3,7 @@
 
 ## Возможности
 - Поддержка Trivy & Grype JSON-отчетов для Docker-образов, контейнеров и файлов.
-- Два режима: уязвимости (`vuln`) и misconfigurations (`config`).
+- Разбор уязвимостей в отчётах.
 - Цветная подсветка уровней критичности (CRITICAL, HIGH, MEDIUM, LOW, NEGLIGIBLE, UNKNOWN).
 - Фильтрация по минимальному уровню severity (`--min-severity`).
 - Подсчет количества найденных проблем.
@@ -11,11 +11,7 @@
 
 ## Использование
 ```bash
-Usage: ./json-report-pretty.sh <config|vuln> <json-report.json> [--min-severity=LEVEL]
-
-Modes:
-  config     Show misconfigurations (policy violations)
-  vuln       Show vulnerabilities
+Usage: ./json-report-pretty.sh <json-report.json> [--min-severity=LEVEL]
 
 Options:
   --min-severity=LEVEL   Minimum severity to display (CRITICAL|HIGH|MEDIUM|LOW|NEGLIGIBLE|UNKNOWN)
